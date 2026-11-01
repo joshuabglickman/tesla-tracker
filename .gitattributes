@@ -1,0 +1,2 @@
+# Keep the published key byte-for-byte as generated.
+*.pem text eol=lf
