@@ -29,22 +29,21 @@ Tesla makes every Fleet API app, including personal ones, register and publish a
 The dashboard walks you through these steps and tracks which ones are done.
 
 1. **Host the public key.** This repo publishes it with GitHub Pages from the `docs/` folder at
-   https://schoolforjews.com/.well-known/appspecific/com.tesla.3p.public-key.pem
+   https://tesla.schoolforjews.com/.well-known/appspecific/com.tesla.3p.public-key.pem
    - The key in `docs/` must match `data/com.tesla.3p.public-key.pem`, which the app generates on first start.
      If `data/` is ever lost, copy the new key into `docs/` and push.
-   - GitHub: Settings → Pages → Deploy from a branch → `main` / `docs`, custom domain `schoolforjews.com`,
+   - GitHub: Settings → Pages → Deploy from a branch → `main` / `docs`, custom domain `tesla.schoolforjews.com`,
      Enforce HTTPS.
-   - DNS (Domain.com): `A` records for `@` → 185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153;
-     `CNAME` record `www` → `joshuabglickman.github.io`.
+   - DNS (Domain.com): `CNAME` record `tesla` → `joshuabglickman.github.io`.
 2. **Create a Tesla developer app** at https://developer.tesla.com:
-   - Allowed origin: `https://schoolforjews.com`
+   - Allowed origin: `https://tesla.schoolforjews.com`
    - Allowed redirect URI: `http://localhost:8081/auth/callback` (this PC uses port 8081; see `config/application.properties`)
    - Scopes: Vehicle Information and Vehicle Location
    - Tesla bills Fleet API usage and asks for a payment method. Personal use like this generally stays within the
      monthly credit, but check their current pricing.
 3. Copy `config/application.properties.example` to `config/application.properties` and fill in the Client ID
    and Client Secret. Outside North America, also set the EU base URL shown in the file.
-4. Restart the app. In the dashboard, enter `schoolforjews.com` and click **Register**, then **Connect Tesla**.
+4. Restart the app. In the dashboard, enter `tesla.schoolforjews.com` and click **Register**, then **Connect Tesla**.
 
 ## Exports
 
