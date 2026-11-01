@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tesla Miles</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #16181d; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --bar: #3b82f6; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --text: #e8eaee; --muted: #9aa1ad; --line: #272b34;
+      --accent: #60a5fa; --bar: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-size: 24px; margin: 0; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  h3 { font-size: 14px; margin: 20px 0 8px; color: var(--muted); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .banner { border-left: 4px solid var(--warn); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 16px; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat .label { font-size: 13px; color: var(--muted); }
+  .stat .value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stat .unit { font-size: 13px; color: var(--muted); font-weight: 400; }
+  .chart { width: 100%; overflow-x: auto; }
+  .chart svg { display: block; width: 100%; height: 160px; }
+  .chart rect.bar { fill: var(--bar); }
+  .chart rect.bar:hover { fill: var(--accent); opacity: .8; }
+  .chart text { fill: var(--muted); font-size: 10px; }
+  .chart line { stroke: var(--line); }
+  button, .button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 8px; padding: 7px 14px; cursor: pointer; text-decoration: none; display: inline-block; }
+  .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  ol.steps { padding-left: 20px; margin: 12px 0 0; }
+  ol.steps li { margin-bottom: 18px; }
+  .chip { font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; margin-left: 6px; }
+  .done { color: var(--ok); } .todo { color: var(--warn); } .error { color: var(--bad); }
+  code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; word-break: break-all; }
+  textarea { width: 100%; font: 12px ui-monospace, Consolas, monospace; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; }
+  input[type=text] { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--text); min-width: 0; flex: 1 1 220px; }
+  .state { text-transform: capitalize; }
+  .map { height: 300px; border-radius: 10px; border: 1px solid var(--line); margin-top: 16px; z-index: 0; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover, tbody tr.selected { background: var(--bg); }
+  td.place { white-space: normal; min-width: 180px; }
+  .small { font-size: 12px; }
+  button.link { border: 0; background: none; padding: 0; color: var(--accent); font-size: 12px; }
+  .name-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .name-form input { flex: 1 1 120px; padding: 4px 8px; font-size: 13px; }
+  .name-form button { padding: 3px 10px; font-size: 13px; }
+  ul.places { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.places li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Tesla Miles</h1>
+    <div class="toolbar" id="toolbar" hidden>
+      <span class="muted" id="lastPoll"></span>
+      <button id="pollBtn">Check now</button>
+      <a class="button" href="/api/export/drives.csv">Drives CSV</a>
+      <a class="button" href="/api/export/daily.csv">Daily CSV</a>
+      <a class="button" href="/api/export/readings.csv">Readings CSV</a>
+    </div>
+  </header>
+
+  <div class="card banner" id="message" hidden></div>
+  <div class="card banner" id="pollError" hidden></div>
+
+  <section class="card" id="setup" hidden>
+    <h2>Set up</h2>
+    <p class="muted">You only do this once. After that, mileage is recorded automatically while this app runs.</p>
+    <ol class="steps">
+      <li>
+        <strong>Create a Tesla developer app</strong> <span class="chip" id="s1"></span><br>
+        At <a href="https://developer.tesla.com" target="_blank" rel="noopener">developer.tesla.com</a>, create an application:
+        <ul>
+          <li>Allowed origin: the HTTPS domain where you'll publish the public key (step 2), e.g. <code>https://yourname.github.io</code></li>
+          <li>Allowed redirect URI: <code id="redirectUri"></code></li>
+          <li>Scopes: <em>Vehicle Information</em> and <em>Vehicle Location</em> (plus offline access)</li>
+        </ul>
+        Put the Client ID and Client Secret in <code>config/application.properties</code> (copy it from the
+        <code>.example</code> file), then restart the app.
+      </li>
+      <li>
+        <strong>Publish this public key</strong><br>
+        Tesla requires it at <code>https://YOUR-DOMAIN/.well-known/appspecific/com.tesla.3p.public-key.pem</code>.
+        The README describes a free way to host it on GitHub Pages.
+        <textarea id="publicKey" rows="5" readonly></textarea>
+        <button id="copyKey">Copy key</button>
+      </li>
+      <li>
+        <strong>Register the app with Tesla</strong> <span class="chip" id="s3"></span><br>
+        <div class="toolbar" style="margin-top:6px">
+          <input type="text" id="domain" placeholder="yourname.github.io">
+          <button id="registerBtn">Register</button>
+        </div>
+        <div id="registerResult" class="muted"></div>
+      </li>
+      <li>
+        <strong>Connect your Tesla account</strong> <span class="chip" id="s4"></span><br>
+        <a class="button primary" href="/auth/login" style="margin-top:6px">Connect Tesla</a>
+      </li>
+    </ol>
+  </section>
+
+  <div id="vehicles"></div>
+
+  <section class="card" id="placesCard" hidden>
+    <h2>Named places</h2>
+    <div class="muted">Use "Name this place" next to any address to label it (e.g. Home or Work).
+      Any position within 150 m of a named place gets that name.</div>
+    <ul class="places" id="placesList"></ul>
+  </section>
+
+  <section id="footer" hidden>
+    <form method="post" action="/auth/unlink" id="unlinkForm">
+      <button type="button" id="unlinkBtn">Disconnect Tesla account</button>
+      <span id="unlinkConfirm" hidden>
+        Stop tracking? Recorded miles are kept.
+        <button type="submit">Disconnect</button>
+        <button type="button" id="unlinkCancel">Cancel</button>
+      </span>
+    </form>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (n, d = 1) => n == null ? '-' : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const ago = iso => {
+  if (!iso) return 'never';
+  const s = Math.round((Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  return new Date(iso).toLocaleString();
+};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const chip = (el, ok, text) => { el.textContent = text ?? (ok ? 'done' : 'to do'); el.className = 'chip ' + (ok ? 'done' : 'todo'); };
+
+function barChart(items, label, value, labelEvery) {
+  const w = 900, h = 160, pad = { t: 10, r: 4, b: 22, l: 34 };
+  const max = Math.max(1, ...items.map(value));
+  const step = (w - pad.l - pad.r) / items.length;
+  const y = v => pad.t + (h - pad.t - pad.b) * (1 - v / max);
+  let svg = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img">`;
+  [0, max / 2, max].forEach(t => {
+    svg += `<line x1="${pad.l}" x2="${w - pad.r}" y1="${y(t)}" y2="${y(t)}"/>` +
+           `<text x="${pad.l - 4}" y="${y(t) + 3}" text-anchor="end">${Math.round(t)}</text>`;
+  });
+  items.forEach((it, i) => {
+    const v = value(it), x = pad.l + i * step;
+    svg += `<rect class="bar" x="${x + step * 0.15}" y="${y(v)}" width="${step * 0.7}" height="${Math.max(0, h - pad.b - y(v))}">` +
+           `<title>${esc(label(it))}: ${fmt(v)} mi</title></rect>`;
+    if (i % labelEvery === 0) svg += `<text x="${x + step / 2}" y="${h - 6}" text-anchor="middle">${esc(label(it))}</text>`;
+  });
+  return svg + '</svg>';
+}
+
+function renderVehicle(v) {
+  const day = d => new Date(d + 'T00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const month = m => new Date(m + '-01T00:00').toLocaleDateString(undefined, { month: 'short' });
+  const stat = (label, n, unit = 'mi', d = 1) =>
+    `<div class="stat"><div class="label">${label}</div><div class="value">${fmt(n, d)} <span class="unit">${unit}</span></div></div>`;
+  const driving = ['D', 'R', 'N'].includes(v.shiftState);
+  const state = driving ? 'driving' : (v.state ?? 'unknown');
+  return `<section class="card">
+    <h2>${esc(v.name || v.vin)}</h2>
+    <div class="muted"><span class="state">${esc(state)}</span> · odometer read ${ago(v.lastDataAt)}
+      ${v.trackingSince ? ' · tracking since ' + new Date(v.trackingSince + 'T00:00').toLocaleDateString() : ''}</div>
+    <div class="stats">
+      ${stat('Today', v.today)}${stat('Last 7 days', v.last7Days)}${stat('Last 30 days', v.last30Days)}
+      ${stat('This year', v.yearToDate, 'mi', 0)}${stat('Odometer', v.odometerMiles, 'mi', 0)}
+    </div>
+    <h3>Daily miles, last 60 days</h3>
+    <div class="chart">${barChart(v.daily, d => day(d.date), d => d.miles, 7)}</div>
+    <h3>Monthly miles</h3>
+    <div class="chart">${barChart(v.monthly, m => month(m.month), m => m.miles, 1)}</div>
+    <h3>Location</h3>
+    ${v.latitude == null
+      ? '<div class="muted">No location yet. Make sure Vehicle Location was allowed when you connected your Tesla account.</div>'
+      : `<div class="muted">Last known position, ${ago(v.lastDataAt)}</div>${place(v.place, v.latitude, v.longitude)}`}
+    <div class="map" id="map-${esc(v.vin)}" ${v.latitude == null ? 'hidden' : ''}></div>
+    <h3>Recent drives</h3>
+    ${v.recentDrives.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Started</th><th>Duration</th><th class="num">Miles</th><th>From</th><th>To</th></tr></thead>
+      <tbody>${v.recentDrives.map((d, i) => `<tr data-vin="${esc(v.vin)}" data-drive="${i}">
+        <td>${d.approximate ? 'Between ' + when(d.startedAt) + ' and ' + when(d.endedAt) : when(d.startedAt)}</td>
+        <td>${!d.endedAt ? 'in progress' : d.approximate ? '-' : duration(d.startedAt, d.endedAt)}</td>
+        <td class="num">${fmt(d.miles)}</td>
+        <td class="place">${place(d.startPlace, d.startLat, d.startLon)}</td>
+        <td class="place">${d.endedAt ? place(d.endPlace, d.endLat, d.endLon) : '-'}</td></tr>`).join('')}</tbody>
+    </table></div><div class="muted" style="margin-top:6px">Click a drive to show its route on the map.</div>`
+    : '<div class="muted">No drives recorded yet.</div>'}
+  </section>`;
+}
+
+// Place name (yours, or the map's) as the main line and the street address below it.
+function place(label, lat, lon) {
+  if (lat == null) return '-';
+  const link = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`;
+  const title = label?.name || label?.address || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+  const sub = label?.name && label?.address ? label.address : (label?.address ? '' : 'Looking up address...');
+  return `<div><a href="${link}" target="_blank" rel="noopener">${esc(title)}</a></div>`
+    + (sub ? `<div class="muted small">${esc(sub)}</div>` : '')
+    + (label?.savedPlaceId ? '' : `<button type="button" class="link name-btn" data-lat="${lat}" data-lon="${lon}">Name this place</button>`);
+}
+const lookupsPending = vehicles => vehicles.some(v =>
+  (v.latitude != null && !v.place?.address) ||
+  v.recentDrives.some(d => (d.startLat != null && !d.startPlace?.address) || (d.endLat != null && !d.endPlace?.address)));
+const when = iso => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const duration = (a, b) => {
+  const m = Math.round((new Date(b) - new Date(a)) / 60000);
+  return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+};
+
+let maps = [];
+let summaries = [];
+function renderMaps() {
+  maps.forEach(m => m.map.remove());
+  maps = [];
+  if (!window.L) return;
+  for (const v of summaries) {
+    if (v.latitude == null) continue;
+    const map = L.map('map-' + v.vin).setView([v.latitude, v.longitude], 14);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    L.marker([v.latitude, v.longitude]).addTo(map)
+      .bindTooltip(esc([v.name || v.vin, v.place?.name || v.place?.address].filter(Boolean).join(' · ')));
+    maps.push({ vin: v.vin, map, route: null });
+  }
+}
+function showDrive(vin, index) {
+  const entry = maps.find(m => m.vin === vin);
+  const drive = summaries.find(v => v.vin === vin)?.recentDrives[index];
+  document.querySelectorAll(`tr[data-vin="${CSS.escape(vin)}"]`)
+    .forEach(tr => tr.classList.toggle('selected', tr.dataset.drive === String(index)));
+  if (!entry || !drive || !drive.path.length) return;
+  if (entry.route) entry.route.remove();
+  const points = drive.path.map(p => [p.lat, p.lon]);
+  entry.route = L.featureGroup([
+    L.polyline(points, { weight: 4 }),
+    L.circleMarker(points[0], { radius: 6 }).bindTooltip('Start'),
+    L.circleMarker(points[points.length - 1], { radius: 6 }).bindTooltip(drive.endedAt ? 'End' : 'Latest')
+  ]).addTo(entry.map);
+  entry.map.fitBounds(entry.route.getBounds(), { padding: [30, 30], maxZoom: 16 });
+}
+document.addEventListener('click', async e => {
+  const nameBtn = e.target.closest('.name-btn');
+  if (nameBtn) {
+    const form = document.createElement('form');
+    form.className = 'name-form';
+    form.innerHTML = '<input type="text" placeholder="e.g. Home" required maxlength="80">'
+      + '<button type="submit">Save</button><button type="button" class="cancel">Cancel</button>';
+    form.dataset.lat = nameBtn.dataset.lat;
+    form.dataset.lon = nameBtn.dataset.lon;
+    nameBtn.replaceWith(form);
+    form.querySelector('input').focus();
+    return;
+  }
+  const cancel = e.target.closest('.name-form .cancel');
+  if (cancel) {
+    const form = cancel.closest('form');
+    form.outerHTML = `<button type="button" class="link name-btn" data-lat="${form.dataset.lat}" data-lon="${form.dataset.lon}">Name this place</button>`;
+    return;
+  }
+  const remove = e.target.closest('button[data-remove-place]');
+  if (remove) {
+    await fetch('/api/places/' + remove.dataset.removePlace, { method: 'DELETE' });
+    return refresh();
+  }
+  const row = e.target.closest('tr[data-drive]');
+  if (row && !e.target.closest('a, button, form')) showDrive(row.dataset.vin, Number(row.dataset.drive));
+});
+document.addEventListener('submit', async e => {
+  const form = e.target.closest('.name-form');
+  if (!form) return;
+  e.preventDefault();
+  await fetch('/api/places', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: form.querySelector('input').value,
+      latitude: Number(form.dataset.lat), longitude: Number(form.dataset.lon) })
+  });
+  refresh();
+});
+
+// Forces a re-render even if the summary looks unchanged.
+function refresh() { summaries = []; return load(); }
+
+async function loadPlaces() {
+  const list = await (await fetch('/api/places')).json();
+  $('placesCard').hidden = false;
+  $('placesList').innerHTML = list.length ? list.map(p => `<li><span><strong>${esc(p.name)}</strong>
+      <span class="muted small">${p.latitude.toFixed(4)}, ${p.longitude.toFixed(4)}</span></span>
+      <button type="button" data-remove-place="${p.id}">Remove</button></li>`).join('')
+    : '<li class="muted">None yet.</li>';
+}
+
+let pendingTimer;
+
+async function load() {
+  const status = await (await fetch('/api/status')).json();
+  $('redirectUri').textContent = status.redirectUri;
+  $('publicKey').value = status.publicKeyPem;
+  chip($('s1'), status.configured);
+  chip($('s4'), status.linked);
+  $('s3').textContent = 'once'; $('s3').className = 'chip muted';
+  $('setup').hidden = status.linked;
+  $('toolbar').hidden = $('footer').hidden = !status.linked;
+  $('lastPoll').textContent = 'Last checked ' + ago(status.lastPollAt);
+  $('pollError').hidden = !status.lastError;
+  $('pollError').textContent = status.lastError ? 'Last check failed: ' + status.lastError : '';
+
+  if (status.linked) {
+    loadPlaces();
+    const vehicles = await (await fetch('/api/summary')).json();
+    // Addresses are looked up in the background; check back soon while some are missing.
+    clearTimeout(pendingTimer);
+    if (lookupsPending(vehicles)) pendingTimer = setTimeout(load, 5000);
+    // Re-rendering resets the map, so skip it when nothing changed (e.g. while a drive is selected).
+    if (JSON.stringify(vehicles) === JSON.stringify(summaries) && maps.length) return;
+    if (document.querySelector('.name-form')) return; // don't wipe a place name being typed
+    summaries = vehicles;
+    $('vehicles').innerHTML = vehicles.length ? vehicles.map(renderVehicle).join('')
+      : '<section class="card muted">No vehicles found yet. The first check runs within a few minutes, or click "Check now".</section>';
+    renderMaps();
+  }
+}
+
+const params = new URLSearchParams(location.search);
+if (params.get('message')) {
+  $('message').textContent = params.get('message');
+  $('message').hidden = false;
+  history.replaceState(null, '', '/');
+}
+
+$('copyKey').onclick = () => navigator.clipboard.writeText($('publicKey').value)
+  .then(() => $('copyKey').textContent = 'Copied');
+$('registerBtn').onclick = async () => {
+  $('registerResult').textContent = 'Registering...';
+  const res = await fetch('/api/partner-registration', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain: $('domain').value })
+  });
+  const body = await res.json();
+  $('registerResult').className = res.ok ? 'done' : 'error';
+  $('registerResult').textContent = res.ok ? 'Registered ' + body.domain + '.' : body.error;
+};
+$('pollBtn').onclick = async () => {
+  $('pollBtn').disabled = true;
+  $('pollBtn').textContent = 'Checking...';
+  try { await fetch('/api/poll', { method: 'POST' }); await load(); }
+  finally { $('pollBtn').disabled = false; $('pollBtn').textContent = 'Check now'; }
+};
+$('unlinkBtn').onclick = () => { $('unlinkConfirm').hidden = false; $('unlinkBtn').hidden = true; };
+$('unlinkCancel').onclick = () => { $('unlinkConfirm').hidden = true; $('unlinkBtn').hidden = false; };
+
+load();
+setInterval(load, 60_000);
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# Copy this file to config/application.properties and fill in the values from
+# https://developer.tesla.com (your application's "Credentials & APIs" page).
+tesla.client-id=
+tesla.client-secret=
+
+# Uncomment if your Tesla account is in Europe / Middle East / Africa:
+#tesla.fleet-api-base-url=https://fleet-api.prd.eu.vn.cloud.tesla.com
