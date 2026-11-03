@@ -46,7 +46,7 @@ public class GeocodingService {
     private static final Logger log = LoggerFactory.getLogger(GeocodingService.class);
 
     /** Bump when lookups change, so cached results from the old lookup are redone. */
-    static final int VERSION = 2;
+    static final int VERSION = 3;
 
     /** Features that are part of where you parked rather than where you went. */
     private static final Set<String> MINOR_TYPES = Set.of(
@@ -158,35 +158,37 @@ public class GeocodingService {
         if (result == null || result.has("error")) {
             return new GeocodedPlace(key, null, null, Instant.now(), VERSION);
         }
+        int version = VERSION;
         if (isMinorFeature(result)) {
-            Optional<JsonNode> business = nearbyBusiness(latitude, longitude);
-            if (business.isPresent()) {
-                JsonNode tags = business.get().path("tags");
-                return new GeocodedPlace(key, tags.path("name").asText(), formatAddress(result, tags), Instant.now(), VERSION);
+            try {
+                Optional<JsonNode> business = nearbyBusiness(latitude, longitude);
+                if (business.isPresent()) {
+                    JsonNode tags = business.get().path("tags");
+                    return new GeocodedPlace(key, tags.path("name").asText(), formatAddress(result, tags), Instant.now(), VERSION);
+                }
+            } catch (RestClientException e) {
+                // Overpass is often busy. Show Nominatim's answer for now, but save it as out of date
+                // so the hourly backfill tries the business lookup again.
+                log.warn("Nearby business lookup failed for {}, will retry: {}", key, e.getMessage());
+                version = VERSION - 1;
             }
         }
-        return new GeocodedPlace(key, placeName(result), formatAddress(result), Instant.now(), VERSION);
+        return new GeocodedPlace(key, placeName(result), formatAddress(result), Instant.now(), version);
     }
 
-    /** The nearest named business within the nearby radius, or empty if none or Overpass is unavailable. */
+    /** The nearest named business within the nearby radius, or empty if there is none. */
     private Optional<JsonNode> nearbyBusiness(double latitude, double longitude) {
         String query = String.format(Locale.ROOT, "[out:json][timeout:25];nwr(around:%d,%.6f,%.6f)[name]"
                 + "[~\"^(shop|amenity|leisure|tourism|office|healthcare|craft)$\"~\".\"];out center tags;",
                 nearbyRadiusMeters, latitude, longitude);
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("data", query);
-        try {
-            JsonNode result = http.post().uri(nearbyUrl)
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body(form)
-                    .retrieve()
-                    .body(JsonNode.class);
-            return result == null ? Optional.empty() : nearestBusiness(result, latitude, longitude);
-        } catch (RestClientException e) {
-            // Overpass is often busy; fall back to Nominatim's answer rather than failing the lookup.
-            log.warn("Nearby business lookup failed: {}", e.getMessage());
-            return Optional.empty();
-        }
+        JsonNode result = http.post().uri(nearbyUrl)
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(form)
+                .retrieve()
+                .body(JsonNode.class);
+        return result == null ? Optional.empty() : nearestBusiness(result, latitude, longitude);
     }
 
     static boolean isMinorFeature(JsonNode result) {

@@ -29,15 +29,20 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/api")
@@ -93,6 +98,13 @@ public class ApiController {
                             Double startLat, Double startLon, PlaceLabel startPlace,
                             Double endLat, Double endLon, PlaceLabel endPlace,
                             Destination destination, List<Point> path) {
+
+        /** When the drive happened: its start, or the middle of the range when only the range is known. */
+        Instant when() {
+            return approximate && endedAt != null
+                    ? startedAt.plus(Duration.between(startedAt, endedAt).dividedBy(2))
+                    : startedAt;
+        }
 
         /** A drive that stops within this distance of its navigation destination arrived there. */
         static final double ARRIVAL_METERS = 300;
@@ -254,17 +266,23 @@ public class ApiController {
     @GetMapping(value = "/export/drives.csv", produces = "text/csv")
     public ResponseEntity<String> drivesCsv() {
         StringBuilder csv = new StringBuilder(
-                "vin,vehicle,started_at,ended_at,times_approximate,miles,"
+                "date,time,miles,from,to,vin,vehicle,started_at,ended_at,times_approximate,"
                         + "start_name,start_address,start_latitude,start_longitude,"
                         + "end_name,end_address,end_latitude,end_longitude,"
                         + "navigation_destination,navigation_latitude,navigation_longitude\n");
         PlaceService.Labeler labeler = places.labeler();
+        ZoneId zone = ZoneId.systemDefault();
         for (Vehicle v : vehicles.findAll()) {
             for (Drive drive : DriveDetector.detect(readings.findByVinOrderByRecordedAtAsc(v.getVin()))) {
                 DriveView d = DriveView.of(drive, labeler);
-                csv.append(v.getVin()).append(',').append(csvText(v.getDisplayName())).append(',')
-                        .append(d.startedAt()).append(',').append(d.endedAt() == null ? "" : d.endedAt()).append(',').append(d.approximate()).append(',')
+                ZonedDateTime when = d.when().atZone(zone);
+                csv.append(when.toLocalDate()).append(',')
+                        .append(when.toLocalTime().truncatedTo(ChronoUnit.MINUTES)).append(',')
                         .append(String.format("%.2f", d.miles())).append(',')
+                        .append(csvText(fullPlace(d.startPlace()))).append(',')
+                        .append(csvText(d.endedAt() == null ? "" : fullPlace(d.endPlace()))).append(',')
+                        .append(v.getVin()).append(',').append(csvText(v.getDisplayName())).append(',')
+                        .append(d.startedAt()).append(',').append(d.endedAt() == null ? "" : d.endedAt()).append(',').append(d.approximate()).append(',')
                         .append(csvPlace(d.startPlace())).append(',')
                         .append(csvNumber(d.startLat())).append(',').append(csvNumber(d.startLon())).append(',')
                         .append(csvPlace(d.endPlace())).append(',')
@@ -278,6 +296,16 @@ public class ApiController {
     private static String csvDestination(Destination destination) {
         return destination == null ? ",," : csvText(destination.name()) + ','
                 + csvNumber(destination.lat()) + ',' + csvNumber(destination.lon());
+    }
+
+    /** "Giant, 1020 W 41st St, Baltimore, MD 21211": the name and address together, or whichever is known. */
+    static String fullPlace(PlaceLabel place) {
+        if (place == null) {
+            return "";
+        }
+        return Stream.of(place.name(), place.address())
+                .filter(part -> part != null && !part.isBlank())
+                .collect(Collectors.joining(", "));
     }
 
     private static String csvPlace(PlaceLabel place) {

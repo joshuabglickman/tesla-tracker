@@ -55,7 +55,8 @@ The dashboard walks you through these steps and tracks which ones are done.
 
 ## Exports
 
-- **Drives CSV**: one row per drive with start/end time, miles, and start/end place name, address and coordinates, and the navigation destination if one was set
+- **Drives CSV**: one row per drive starting with its local date and time (the middle of the range for drives
+  whose exact time isn't known), miles, and where it went from and to as "name, address"; then exact start/end time, miles, and start/end place name, address and coordinates, and the navigation destination if one was set
   (useful as a mileage log)
 - **Daily CSV**: miles per day
 - **Readings CSV**: every raw reading (odometer, gear, latitude, longitude, speed)
