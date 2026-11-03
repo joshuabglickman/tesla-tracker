@@ -42,6 +42,41 @@ class GeocodingServiceTest {
     }
 
     @Test
+    void namesAParkingLotSpotAfterTheNearestBusiness() throws Exception {
+        JsonNode charger = json("""
+                {"category": "amenity", "type": "charging_station", "name": "Volta Charging",
+                 "address": {"road": "Hickory Avenue", "city": "Baltimore", "state": "Maryland",
+                             "postcode": "21211", "country_code": "us"}}""");
+        JsonNode overpass = json("""
+                {"elements": [
+                  {"type": "node", "lat": 39.33840, "lon": -76.63550,
+                   "tags": {"name": "Volta Charging", "amenity": "charging_station"}},
+                  {"type": "node", "lat": 39.33860, "lon": -76.63550,
+                   "tags": {"name": "Giant", "shop": "supermarket",
+                            "addr:housenumber": "1020", "addr:street": "West 41st Street"}},
+                  {"type": "way", "center": {"lat": 39.33900, "lon": -76.63550},
+                   "tags": {"name": "Royal Farms", "shop": "convenience"}}]}""");
+
+        assertThat(GeocodingService.isMinorFeature(charger)).isTrue();
+        JsonNode giant = GeocodingService.nearestBusiness(overpass, 39.338366, -76.63552).orElseThrow();
+        assertThat(giant.path("tags").path("name").asText()).isEqualTo("Giant");
+        assertThat(GeocodingService.formatAddress(charger, giant.path("tags")))
+                .isEqualTo("1020 W 41st St, Baltimore, MD 21211");
+        // Without a street of its own, a business takes the parked spot's address.
+        assertThat(GeocodingService.formatAddress(charger, json("{\"name\": \"Royal Farms\"}")))
+                .isEqualTo("Hickory Ave, Baltimore, MD 21211");
+    }
+
+    @Test
+    void abbreviatesUsStreetsButKeepsDirectionsThatAreTheName() {
+        assertThat(UsAddress.street("West 41st Street")).isEqualTo("W 41st St");
+        assertThat(UsAddress.street("North Avenue")).isEqualTo("North Ave");
+        assertThat(UsAddress.street("Main Street Northwest")).isEqualTo("Main St NW");
+        assertThat(UsAddress.street("Broadway")).isEqualTo("Broadway");
+        assertThat(UsAddress.state("Maryland")).isEqualTo("MD");
+    }
+
+    @Test
     void measuresDistanceAndRoundsKeys() {
         // One thousandth of a degree of latitude is about 111 m.
         assertThat(PlaceService.distanceMeters(37.0, -122.0, 37.001, -122.0)).isCloseTo(111.2, within(0.5));

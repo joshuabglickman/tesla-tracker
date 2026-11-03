@@ -21,14 +21,22 @@ public class GeocodedPlace {
 
     private Instant resolvedAt;
 
+    /** Which version of the lookup produced this; older results are looked up again. */
+    private Integer version;
+
     protected GeocodedPlace() {
     }
 
-    public GeocodedPlace(String coordKey, String name, String address, Instant resolvedAt) {
+    public GeocodedPlace(String coordKey, String name, String address, Instant resolvedAt, int version) {
         this.coordKey = coordKey;
         this.name = name;
         this.address = address;
         this.resolvedAt = resolvedAt;
+        this.version = version;
+    }
+
+    public boolean isCurrent(int currentVersion) {
+        return version != null && version >= currentVersion;
     }
 
     public String getCoordKey() { return coordKey; }

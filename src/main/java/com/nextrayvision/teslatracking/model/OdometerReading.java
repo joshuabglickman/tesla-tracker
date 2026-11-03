@@ -9,7 +9,7 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 
-/** One snapshot of a vehicle: odometer, gear and GPS position at a point in time. */
+/** One snapshot of a vehicle: odometer, gear, GPS position and navigation destination at a point in time. */
 @Entity
 @Table(indexes = @Index(columnList = "vin, recordedAt"))
 public class OdometerReading {
@@ -33,6 +33,13 @@ public class OdometerReading {
 
     private Double speedMph;
 
+    /** Where the car's navigation was routing to, or null when no route was active. */
+    private String destinationName;
+
+    private Double destinationLatitude;
+
+    private Double destinationLongitude;
+
     protected OdometerReading() {
     }
 
@@ -55,6 +62,17 @@ public class OdometerReading {
         return latitude != null && longitude != null;
     }
 
+    public boolean hasDestination() {
+        return destinationName != null || destinationLatitude != null;
+    }
+
+    public OdometerReading withDestination(String name, Double latitude, Double longitude) {
+        this.destinationName = name;
+        this.destinationLatitude = latitude;
+        this.destinationLongitude = longitude;
+        return this;
+    }
+
     public Long getId() { return id; }
     public String getVin() { return vin; }
     public Instant getRecordedAt() { return recordedAt; }
@@ -63,4 +81,7 @@ public class OdometerReading {
     public Double getLatitude() { return latitude; }
     public Double getLongitude() { return longitude; }
     public Double getSpeedMph() { return speedMph; }
+    public String getDestinationName() { return destinationName; }
+    public Double getDestinationLatitude() { return destinationLatitude; }
+    public Double getDestinationLongitude() { return destinationLongitude; }
 }

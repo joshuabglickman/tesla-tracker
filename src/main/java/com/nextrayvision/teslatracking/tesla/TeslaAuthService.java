@@ -1,6 +1,7 @@
 package com.nextrayvision.teslatracking.tesla;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nextrayvision.teslatracking.model.TeslaAccount;
 import com.nextrayvision.teslatracking.model.TeslaAccountRepository;
 import org.springframework.http.MediaType;
@@ -12,6 +13,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -77,6 +81,30 @@ public class TeslaAuthService {
             store(account, tokenRequest(form));
         }
         return account.getAccessToken();
+    }
+
+    /** The scopes Tesla actually granted, read from the access token, which may be fewer than were requested. */
+    public List<String> grantedScopes() {
+        return account().map(TeslaAccount::getAccessToken).map(TeslaAuthService::scopesOf).orElse(List.of());
+    }
+
+    static List<String> scopesOf(String jwt) {
+        String[] parts = jwt.split("\\.");
+        if (parts.length < 2) {
+            return List.of();
+        }
+        try {
+            JsonNode scp = new ObjectMapper().readTree(Base64.getUrlDecoder().decode(parts[1])).path("scp");
+            List<String> scopes = new ArrayList<>();
+            if (scp.isArray()) {
+                scp.forEach(s -> scopes.add(s.asText()));
+            } else if (scp.isTextual()) {
+                scopes.addAll(List.of(scp.asText().split(" ")));
+            }
+            return scopes;
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     public void setFleetApiBaseUrl(String url) {

@@ -135,6 +135,7 @@
   </section>
 
   <section id="footer" hidden>
+    <div class="muted" id="permissions" style="margin-bottom:10px"></div>
     <form method="post" action="/auth/unlink" id="unlinkForm">
       <button type="button" id="unlinkBtn">Disconnect Tesla account</button>
       <span id="unlinkConfirm" hidden>
@@ -200,7 +201,9 @@ function renderVehicle(v) {
     <div class="chart">${barChart(v.monthly, m => month(m.month), m => m.miles, 1)}</div>
     <h3>Location</h3>
     ${v.latitude == null
-      ? '<div class="muted">No location yet. Make sure Vehicle Location was allowed when you connected your Tesla account.</div>'
+      ? `<div class="muted">${locationGranted
+          ? 'No location yet. It will appear after the next check while the car is awake.'
+          : 'No location: your Tesla connection does not include Vehicle Location. Disconnect your Tesla account below, connect again, and allow Vehicle Location.'}</div>`
       : `<div class="muted">Last known position, ${ago(v.lastDataAt)}</div>${place(v.place, v.latitude, v.longitude)}`}
     <div class="map" id="map-${esc(v.vin)}" ${v.latitude == null ? 'hidden' : ''}></div>
     <h3>Recent drives</h3>
@@ -211,7 +214,7 @@ function renderVehicle(v) {
         <td>${!d.endedAt ? 'in progress' : d.approximate ? '-' : duration(d.startedAt, d.endedAt)}</td>
         <td class="num">${fmt(d.miles)}</td>
         <td class="place">${place(d.startPlace, d.startLat, d.startLon)}</td>
-        <td class="place">${d.endedAt ? place(d.endPlace, d.endLat, d.endLon) : '-'}</td></tr>`).join('')}</tbody>
+        <td class="place">${d.endedAt ? place(d.endPlace, d.endLat, d.endLon) : '-'}${navigation(d.destination, d.endedAt && d.endPlace)}</td></tr>`).join('')}</tbody>
     </table></div><div class="muted" style="margin-top:6px">Click a drive to show its route on the map.</div>`
     : '<div class="muted">No drives recorded yet.</div>'}
   </section>`;
@@ -226,6 +229,15 @@ function place(label, lat, lon) {
   return `<div><a href="${link}" target="_blank" rel="noopener">${esc(title)}</a></div>`
     + (sub ? `<div class="muted small">${esc(sub)}</div>` : '')
     + (label?.savedPlaceId ? '' : `<button type="button" class="link name-btn" data-lat="${lat}" data-lon="${lon}">Name this place</button>`);
+}
+// The destination the car's navigation was routing to during a drive, unless the drive ended there.
+function navigation(dest, end) {
+  if (!dest || (!dest.name && dest.lat == null)) return '';
+  if (end?.name && dest.name?.split(',')[0].trim() === end.name) return '';
+  const name = esc(dest.name || `${dest.lat.toFixed(4)}, ${dest.lon.toFixed(4)}`);
+  const text = dest.lat == null ? name
+    : `<a href="https://www.openstreetmap.org/?mlat=${dest.lat}&mlon=${dest.lon}#map=17/${dest.lat}/${dest.lon}" target="_blank" rel="noopener">${name}</a>`;
+  return `<div class="muted small">Navigating to ${text}</div>`;
 }
 const lookupsPending = vehicles => vehicles.some(v =>
   (v.latitude != null && !v.place?.address) ||
@@ -320,6 +332,9 @@ async function loadPlaces() {
 }
 
 let pendingTimer;
+let locationGranted = true;
+const PERMISSIONS = [['vehicle_device_data', 'Vehicle information'], ['vehicle_location', 'Vehicle location'],
+  ['offline_access', 'Stay connected']];
 
 async function load() {
   const status = await (await fetch('/api/status')).json();
@@ -333,6 +348,11 @@ async function load() {
   $('lastPoll').textContent = 'Last checked ' + ago(status.lastPollAt);
   $('pollError').hidden = !status.lastError;
   $('pollError').textContent = status.lastError ? 'Last check failed: ' + status.lastError : '';
+  locationGranted = !status.grantedScopes?.length || status.grantedScopes.includes('vehicle_location');
+  $('permissions').innerHTML = 'Tesla permissions:' + PERMISSIONS.map(([scope, label]) =>
+    status.grantedScopes?.includes(scope)
+      ? `<span class="chip done">&#10003; ${label}</span>`
+      : `<span class="chip error">&#10007; ${label}</span>`).join('');
 
   if (status.linked) {
     loadPlaces();

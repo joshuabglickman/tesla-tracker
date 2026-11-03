@@ -48,6 +48,24 @@ class DriveDetectorTest {
     }
 
     @Test
+    void driveKeepsTheLastNavigationDestinationSetWhileDriving() {
+        List<Drive> drives = DriveDetector.detect(List.of(
+                at("08:00", 1000.0, "P", 1, 1).withDestination("Old plan", 9.0, 9.0),
+                at("08:05", 1003.0, "D", 2, 2).withDestination("Costco", 5.0, 5.0),
+                at("08:10", 1008.0, "D", 3, 3).withDestination("Tesla Supercharger", 4.0, 4.0),
+                at("08:15", 1010.0, "P", 4, 4)));
+
+        assertThat(drives.getFirst().destination().name()).isEqualTo("Tesla Supercharger");
+        assertThat(drives.getFirst().destination().lat()).isEqualTo(4.0);
+
+        List<Drive> withoutRoute = DriveDetector.detect(List.of(
+                at("08:00", 1000.0, "P", 1, 1),
+                at("08:05", 1003.0, "D", 2, 2),
+                at("08:15", 1010.0, "P", 4, 4)));
+        assertThat(withoutRoute.getFirst().destination()).isNull();
+    }
+
+    @Test
     void driveStillInGearIsInProgress() {
         List<Drive> drives = DriveDetector.detect(List.of(
                 at("08:00", 1000.0, "P", 1, 1),

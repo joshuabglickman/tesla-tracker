@@ -16,7 +16,8 @@ public record TeslaProperties(
         String scopes,
         String dataDir,
         Duration pollInterval,
-        Duration parkedPollInterval) {
+        Duration idleBeforeSleepPause,
+        Duration sleepPause) {
 
     public boolean isConfigured() {
         return StringUtils.hasText(clientId) && StringUtils.hasText(clientSecret);

@@ -7,14 +7,22 @@ address), and each drive with its start and end places, route and distance. Ever
 ## How it works
 
 - Every 5 minutes it checks your vehicle list. That call never wakes the car.
-- When a car comes online, and on every check while it's driving, it reads the odometer and GPS position.
-  While driving, that gives a route point about every 5 minutes.
-- While a car is online but parked, it reads the odometer at most once an hour, so the car can still fall asleep.
+- While a car is awake, every check reads its odometer, gear and GPS position, so a drive is noticed within
+  5 minutes and gets a route point about every 5 minutes.
+- Being read keeps a car awake, so once it has sat parked for 15 minutes the app pauses reads for 21 minutes
+  to let it sleep. If it's still awake after the pause (Sentry Mode, climate keeping, charging), reads resume
+  and the cycle repeats. A drive that starts during a pause is noticed when the pause ends.
 - The odometer is cumulative. If this PC is off for a while, no miles are lost: they show up on the next
   reading, credited to the day that reading was taken.
 - Drives are detected from the readings. A drive the app only saw before and after (too short to catch
   in gear, or made while the app was down) still shows up with the correct miles and start/end places,
   but its time is shown as a range.
+- Home and Work are learned automatically. Tesla doesn't share the car's saved Home and Work addresses, but
+  the first time you navigate to either one, the app saves it under that name. Home is also guessed from
+  where the car is parked at 3 a.m. on most nights (once it has seen at least 3 nights). A place you named
+  yourself always wins. If a learned place is wrong, delete it and name the right spot yourself.
+- If the car's navigation has a route set while driving, the drive also records where it was navigating to
+  (the destination's name and position), even if you stopped somewhere else.
 - Each place the car parks is turned into a street address, plus a name for businesses and landmarks, using
   OpenStreetMap's free Nominatim service. Each spot is looked up once and cached, at most one request every
   1.5 seconds. Only coordinates are sent. Set `geocoding.enabled=false` to turn this off.
@@ -47,7 +55,7 @@ The dashboard walks you through these steps and tracks which ones are done.
 
 ## Exports
 
-- **Drives CSV**: one row per drive with start/end time, miles, and start/end place name, address and coordinates
+- **Drives CSV**: one row per drive with start/end time, miles, and start/end place name, address and coordinates, and the navigation destination if one was set
   (useful as a mileage log)
 - **Daily CSV**: miles per day
 - **Readings CSV**: every raw reading (odometer, gear, latitude, longitude, speed)
@@ -68,5 +76,6 @@ All of these go in `config/application.properties`:
 | Property | Default | Meaning |
 |---|---|---|
 | `tesla.poll-interval` | `PT5M` | How often to check the vehicle list |
-| `tesla.parked-poll-interval` | `PT1H` | Minimum gap between odometer reads while parked and awake |
+| `tesla.idle-before-sleep-pause` | `PT15M` | How long the car sits parked and awake before reads pause |
+| `tesla.sleep-pause` | `PT21M` | How long reads pause to let the car fall asleep |
 | `server.port` | `8080` | Dashboard port. If you change it, also update the redirect URI here and at Tesla |

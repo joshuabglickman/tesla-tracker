@@ -13,6 +13,7 @@ import com.nextrayvision.teslatracking.tesla.KeyService;
 import com.nextrayvision.teslatracking.tesla.TeslaAuthService;
 import com.nextrayvision.teslatracking.tesla.TeslaProperties;
 import com.nextrayvision.teslatracking.tracking.DriveDetector;
+import com.nextrayvision.teslatracking.tracking.DriveDetector.Destination;
 import com.nextrayvision.teslatracking.tracking.DriveDetector.Drive;
 import com.nextrayvision.teslatracking.tracking.DriveDetector.Point;
 import com.nextrayvision.teslatracking.tracking.MileageCalculator;
@@ -70,7 +71,8 @@ public class ApiController {
     }
 
     public record Status(boolean configured, boolean linked, String redirectUri, String fleetApiBaseUrl,
-                         Instant linkedAt, Instant lastPollAt, String lastError, String publicKeyPem) {
+                         Instant linkedAt, List<String> grantedScopes, Instant lastPollAt, String lastError,
+                         String publicKeyPem) {
     }
 
     public record DayMiles(LocalDate date, double miles) {
@@ -89,12 +91,32 @@ public class ApiController {
 
     public record DriveView(Instant startedAt, Instant endedAt, boolean approximate, double miles,
                             Double startLat, Double startLon, PlaceLabel startPlace,
-                            Double endLat, Double endLon, PlaceLabel endPlace, List<Point> path) {
+                            Double endLat, Double endLon, PlaceLabel endPlace,
+                            Destination destination, List<Point> path) {
+
+        /** A drive that stops within this distance of its navigation destination arrived there. */
+        static final double ARRIVAL_METERS = 300;
 
         static DriveView of(Drive d, PlaceService.Labeler labeler) {
             return new DriveView(d.startedAt(), d.endedAt(), d.approximate(), d.miles(),
                     d.startLat(), d.startLon(), labeler.label(d.startLat(), d.startLon()),
-                    d.endLat(), d.endLon(), labeler.label(d.endLat(), d.endLon()), d.path());
+                    d.endLat(), d.endLon(), arrival(labeler.label(d.endLat(), d.endLon()), d.destination(), d.endLat(), d.endLon()),
+                    d.destination(), d.path());
+        }
+
+        /**
+         * Names the end of a drive after the destination you navigated to, when the car stopped there.
+         * Tesla reports it the way the car shows it, either "Giant" or "Giant, 1020 W 41st St, Baltimore, MD 21211";
+         * without an address part, the looked-up address is kept. A place you named yourself still wins.
+         */
+        static PlaceLabel arrival(PlaceLabel end, Destination dest, Double endLat, Double endLon) {
+            if (end == null || end.savedPlaceId() != null || dest == null || dest.name() == null || dest.name().isBlank()
+                    || dest.lat() == null || dest.lon() == null || endLat == null || endLon == null
+                    || PlaceService.distanceMeters(endLat, endLon, dest.lat(), dest.lon()) > ARRIVAL_METERS) {
+                return end;
+            }
+            String[] parts = dest.name().split(",\s*", 2);
+            return new PlaceLabel(parts[0].trim(), parts.length > 1 ? parts[1].trim() : end.address(), null);
         }
     }
 
@@ -108,7 +130,8 @@ public class ApiController {
     public Status status() {
         var account = auth.account();
         return new Status(props.isConfigured(), account.isPresent(), props.redirectUri(), auth.fleetApiBaseUrl(),
-                account.map(a -> a.getLinkedAt()).orElse(null), polling.lastPollAt(), polling.lastError(),
+                account.map(a -> a.getLinkedAt()).orElse(null), auth.grantedScopes(),
+                polling.lastPollAt(), polling.lastError(),
                 keys.publicKeyPem());
     }
 
@@ -233,7 +256,8 @@ public class ApiController {
         StringBuilder csv = new StringBuilder(
                 "vin,vehicle,started_at,ended_at,times_approximate,miles,"
                         + "start_name,start_address,start_latitude,start_longitude,"
-                        + "end_name,end_address,end_latitude,end_longitude\n");
+                        + "end_name,end_address,end_latitude,end_longitude,"
+                        + "navigation_destination,navigation_latitude,navigation_longitude\n");
         PlaceService.Labeler labeler = places.labeler();
         for (Vehicle v : vehicles.findAll()) {
             for (Drive drive : DriveDetector.detect(readings.findByVinOrderByRecordedAtAsc(v.getVin()))) {
@@ -244,10 +268,16 @@ public class ApiController {
                         .append(csvPlace(d.startPlace())).append(',')
                         .append(csvNumber(d.startLat())).append(',').append(csvNumber(d.startLon())).append(',')
                         .append(csvPlace(d.endPlace())).append(',')
-                        .append(csvNumber(d.endLat())).append(',').append(csvNumber(d.endLon())).append('\n');
+                        .append(csvNumber(d.endLat())).append(',').append(csvNumber(d.endLon())).append(',')
+                        .append(csvDestination(d.destination())).append('\n');
             }
         }
         return attachment("tesla-drives.csv", csv.toString());
+    }
+
+    private static String csvDestination(Destination destination) {
+        return destination == null ? ",," : csvText(destination.name()) + ','
+                + csvNumber(destination.lat()) + ',' + csvNumber(destination.lon());
     }
 
     private static String csvPlace(PlaceLabel place) {

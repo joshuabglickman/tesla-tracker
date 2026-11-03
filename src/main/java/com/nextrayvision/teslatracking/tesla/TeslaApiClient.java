@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
+import java.net.URI;
 import java.util.Optional;
 
 /** Read-only Fleet API calls. */
@@ -31,8 +32,10 @@ public class TeslaApiClient {
      */
     public Optional<JsonNode> vehicleData(String vin) {
         try {
+            // The separators must be sent as %3B: Tesla drops a query parameter containing a raw ';'
+            // and then returns its default data, which leaves out the location.
             return Optional.of(get("/api/1/vehicles/" + vin
-                    + "/vehicle_data?endpoints=vehicle_state;drive_state;location_data")
+                    + "/vehicle_data?endpoints=vehicle_state%3Bdrive_state%3Blocation_data")
                     .path("response"));
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode() == HttpStatus.REQUEST_TIMEOUT) {
@@ -49,7 +52,7 @@ public class TeslaApiClient {
 
     private JsonNode get(String path) {
         return http.get()
-                .uri(auth.fleetApiBaseUrl() + path)
+                .uri(URI.create(auth.fleetApiBaseUrl() + path))
                 .header("Authorization", "Bearer " + auth.accessToken())
                 .retrieve()
                 .body(JsonNode.class);
