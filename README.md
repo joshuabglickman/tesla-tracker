@@ -27,7 +27,10 @@ address), and each drive with its start and end places, route and distance. Ever
   OpenStreetMap's free Nominatim service. Each spot is looked up once and cached, at most one request every
   1.5 seconds. Only coordinates are sent. Set `geocoding.enabled=false` to turn this off.
 - You can name places yourself (e.g. "Home", "Work") with **Name this place** on the dashboard. Any position
-  within 150 m of a named place uses your name.
+  within 150 m of a named place uses your name. You can also give it an address, for places where the map's
+  address is wrong.
+- A drive that starts where the previous one ended starts from the place that one arrived at, so the trip back
+  from a navigation destination keeps its name.
 - Data stays on this machine in `data/` (H2 database, plus the app's key pair). The location history is
   sensitive, so the dashboard only listens on localhost.
 

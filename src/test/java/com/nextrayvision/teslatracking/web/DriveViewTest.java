@@ -43,6 +43,27 @@ class DriveViewTest {
         assertThat(view(start, null, false).when()).isEqualTo(start);
     }
 
+    @Test
+    void tripBackStartsFromThePlaceTheLastDriveArrivedAt() {
+        PlaceLabel marina = new PlaceLabel("Anchorage Marina", "2339 Boston St, Baltimore, MD 21231", null);
+        PlaceLabel park = new PlaceLabel("Anchorage Promenade Park", "2339 Boston St, Baltimore, MD 21231", null);
+        PlaceLabel home = new PlaceLabel("Home", "725 Newington Ave, Baltimore, MD 21217", 1L);
+        ApiController.DriveView there = drive(home, 39.313339, -76.630338, marina, 39.28078, -76.581492);
+        ApiController.DriveView back = drive(park, 39.28078, -76.581492, home, 39.313339, -76.630338);
+
+        assertThat(back.departingFrom(there).startPlace()).isEqualTo(marina);
+        assertThat(there.departingFrom(back).startPlace()).isEqualTo(home);
+        ApiController.DriveView elsewhere = drive(park, 39.29, -76.59, home, 39.313339, -76.630338);
+        assertThat(elsewhere.departingFrom(there).startPlace()).isEqualTo(park);
+    }
+
+    private static ApiController.DriveView drive(PlaceLabel from, double fromLat, double fromLon,
+                                                 PlaceLabel to, double toLat, double toLon) {
+        Instant start = Instant.parse("2026-11-03T21:42:00Z");
+        return new ApiController.DriveView(start, start.plusSeconds(1800), false, 4.5,
+                fromLat, fromLon, from, toLat, toLon, to, null, List.of());
+    }
+
     private static ApiController.DriveView view(Instant start, Instant end, boolean approximate) {
         return new ApiController.DriveView(start, end, approximate, 1.0, null, null, null, null, null, null, null, List.of());
     }

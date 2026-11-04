@@ -67,7 +67,8 @@ public class PlaceService {
                 geocoding.enqueue(latitude, longitude);
             }
             String name = mine.map(SavedPlace::getName).orElse(found == null ? null : found.getName());
-            String address = found == null ? null : found.getAddress();
+            String address = mine.map(SavedPlace::getAddress).filter(a -> !a.isBlank())
+                    .orElse(found == null ? null : found.getAddress());
             return new PlaceLabel(name, address, mine.map(SavedPlace::getId).orElse(null));
         };
     }

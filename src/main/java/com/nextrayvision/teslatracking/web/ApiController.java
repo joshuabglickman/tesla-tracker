@@ -109,6 +109,34 @@ public class ApiController {
         /** A drive that stops within this distance of its navigation destination arrived there. */
         static final double ARRIVAL_METERS = 300;
 
+        /**
+         * Labels each drive in order. A drive that starts where the previous one ended starts from the place
+         * that one arrived at, so a navigation destination's name is kept for the trip back.
+         */
+        static List<DriveView> all(List<Drive> drives, PlaceService.Labeler labeler) {
+            List<DriveView> views = new ArrayList<>();
+            DriveView previous = null;
+            for (Drive d : drives) {
+                DriveView view = of(d, labeler);
+                if (previous != null) {
+                    view = view.departingFrom(previous);
+                }
+                views.add(view);
+                previous = view;
+            }
+            return views;
+        }
+
+        DriveView departingFrom(DriveView previous) {
+            if (startPlace == null || startPlace.savedPlaceId() != null || previous.endPlace() == null
+                    || previous.endLat() == null || previous.endLon() == null
+                    || PlaceService.distanceMeters(startLat, startLon, previous.endLat(), previous.endLon()) > ARRIVAL_METERS) {
+                return this;
+            }
+            return new DriveView(startedAt, endedAt, approximate, miles, startLat, startLon, previous.endPlace(),
+                    endLat, endLon, endPlace, destination, path);
+        }
+
         static DriveView of(Drive d, PlaceService.Labeler labeler) {
             return new DriveView(d.startedAt(), d.endedAt(), d.approximate(), d.miles(),
                     d.startLat(), d.startLon(), labeler.label(d.startLat(), d.startLon()),
@@ -132,7 +160,7 @@ public class ApiController {
         }
     }
 
-    public record NewPlace(String name, Double latitude, Double longitude, Double radiusMeters) {
+    public record NewPlace(String name, String address, Double latitude, Double longitude, Double radiusMeters) {
     }
 
     public record PartnerRequest(String domain) {
@@ -185,11 +213,9 @@ public class ApiController {
     }
 
     private static List<DriveView> recentDrives(List<OdometerReading> history, PlaceService.Labeler labeler) {
-        List<Drive> drives = new ArrayList<>(DriveDetector.detect(history));
+        List<DriveView> drives = new ArrayList<>(DriveView.all(DriveDetector.detect(history), labeler));
         Collections.reverse(drives);
-        return drives.subList(0, Math.min(RECENT_DRIVES, drives.size())).stream()
-                .map(d -> DriveView.of(d, labeler))
-                .toList();
+        return drives.subList(0, Math.min(RECENT_DRIVES, drives.size()));
     }
 
     @GetMapping("/places")
@@ -204,7 +230,8 @@ public class ApiController {
             return ResponseEntity.badRequest().body(Map.of("error", "A place needs a name and a position."));
         }
         double radius = request.radiusMeters() == null ? DEFAULT_PLACE_RADIUS_METERS : request.radiusMeters();
-        return ResponseEntity.ok(savedPlaces.save(new SavedPlace(name, request.latitude(), request.longitude(), radius)));
+        String address = request.address() == null || request.address().isBlank() ? null : request.address().trim();
+        return ResponseEntity.ok(savedPlaces.save(new SavedPlace(name, address, request.latitude(), request.longitude(), radius)));
     }
 
     @DeleteMapping("/places/{id}")
@@ -273,8 +300,7 @@ public class ApiController {
         PlaceService.Labeler labeler = places.labeler();
         ZoneId zone = ZoneId.systemDefault();
         for (Vehicle v : vehicles.findAll()) {
-            for (Drive drive : DriveDetector.detect(readings.findByVinOrderByRecordedAtAsc(v.getVin()))) {
-                DriveView d = DriveView.of(drive, labeler);
+            for (DriveView d : DriveView.all(DriveDetector.detect(readings.findByVinOrderByRecordedAtAsc(v.getVin())), labeler)) {
                 ZonedDateTime when = d.when().atZone(zone);
                 csv.append(when.toLocalDate()).append(',')
                         .append(when.toLocalTime().truncatedTo(ChronoUnit.MINUTES)).append(',')

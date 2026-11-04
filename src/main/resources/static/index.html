@@ -229,7 +229,12 @@ function place(label, lat, lon) {
   const sub = label?.name && label?.address ? label.address : (label?.address ? '' : 'Looking up address...');
   return `<div><a href="${link}" target="_blank" rel="noopener">${esc(title)}</a></div>`
     + (sub ? `<div class="muted small">${esc(sub)}</div>` : '')
-    + (label?.savedPlaceId ? '' : `<button type="button" class="link name-btn" data-lat="${lat}" data-lon="${lon}">Name this place</button>`);
+    + (label?.savedPlaceId ? '' : nameButton(lat, lon, label));
+}
+// Saving keeps the shown name and address unless you change them, e.g. to fix an address the map has wrong.
+function nameButton(lat, lon, label) {
+  return `<button type="button" class="link name-btn" data-lat="${lat}" data-lon="${lon}"
+    data-name="${esc(label?.name || '')}" data-address="${esc(label?.address || '')}">Name this place</button>`;
 }
 // The destination the car's navigation was routing to during a drive, unless the drive ended there.
 function navigation(dest, end) {
@@ -291,10 +296,12 @@ document.addEventListener('click', async e => {
   if (nameBtn) {
     const form = document.createElement('form');
     form.className = 'name-form';
-    form.innerHTML = '<input type="text" placeholder="e.g. Home" required maxlength="80">'
+    form.innerHTML = '<input type="text" name="name" placeholder="Name, e.g. Home" required maxlength="80">'
+      + '<input type="text" name="address" placeholder="Address (optional)" maxlength="200">'
       + '<button type="submit">Save</button><button type="button" class="cancel">Cancel</button>';
-    form.dataset.lat = nameBtn.dataset.lat;
-    form.dataset.lon = nameBtn.dataset.lon;
+    form.elements.name.value = nameBtn.dataset.name;
+    form.elements.address.value = nameBtn.dataset.address;
+    Object.assign(form.dataset, nameBtn.dataset);
     nameBtn.replaceWith(form);
     form.querySelector('input').focus();
     return;
@@ -302,7 +309,7 @@ document.addEventListener('click', async e => {
   const cancel = e.target.closest('.name-form .cancel');
   if (cancel) {
     const form = cancel.closest('form');
-    form.outerHTML = `<button type="button" class="link name-btn" data-lat="${form.dataset.lat}" data-lon="${form.dataset.lon}">Name this place</button>`;
+    form.outerHTML = nameButton(form.dataset.lat, form.dataset.lon, form.dataset);
     return;
   }
   const remove = e.target.closest('button[data-remove-place]');
@@ -319,7 +326,7 @@ document.addEventListener('submit', async e => {
   e.preventDefault();
   await fetch('/api/places', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: form.querySelector('input').value,
+    body: JSON.stringify({ name: form.elements.name.value, address: form.elements.address.value,
       latitude: Number(form.dataset.lat), longitude: Number(form.dataset.lon) })
   });
   refresh();
@@ -332,7 +339,7 @@ async function loadPlaces() {
   const list = await (await fetch('/api/places')).json();
   $('placesCard').hidden = false;
   $('placesList').innerHTML = list.length ? list.map(p => `<li><span><strong>${esc(p.name)}</strong>
-      <span class="muted small">${p.latitude.toFixed(4)}, ${p.longitude.toFixed(4)}</span></span>
+      <span class="muted small">${esc(p.address || `${p.latitude.toFixed(4)}, ${p.longitude.toFixed(4)}`)}</span></span>
       <button type="button" data-remove-place="${p.id}">Remove</button></li>`).join('')
     : '<li class="muted">None yet.</li>';
 }
