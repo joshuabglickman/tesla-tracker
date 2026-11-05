@@ -59,6 +59,7 @@ public class GeocodingService {
     private final VehicleRepository vehicles;
     private final boolean enabled;
     private final String reverseUrl;
+    private final String searchUrl;
     private final String nearbyUrl;
     private final int nearbyRadiusMeters;
     private final RestClient http;
@@ -69,6 +70,7 @@ public class GeocodingService {
     public GeocodingService(GeocodedPlaceRepository geocoded, OdometerReadingRepository readings, VehicleRepository vehicles,
                             @Value("${geocoding.enabled}") boolean enabled,
                             @Value("${geocoding.reverse-url}") String reverseUrl,
+                            @Value("${geocoding.search-url}") String searchUrl,
                             @Value("${geocoding.nearby-url}") String nearbyUrl,
                             @Value("${geocoding.nearby-radius-meters}") int nearbyRadiusMeters,
                             @Value("${geocoding.user-agent}") String userAgent) {
@@ -77,6 +79,7 @@ public class GeocodingService {
         this.vehicles = vehicles;
         this.enabled = enabled;
         this.reverseUrl = reverseUrl;
+        this.searchUrl = searchUrl;
         this.nearbyUrl = nearbyUrl;
         this.nearbyRadiusMeters = nearbyRadiusMeters;
         SimpleClientHttpRequestFactory timeouts = new SimpleClientHttpRequestFactory();
@@ -115,6 +118,23 @@ public class GeocodingService {
             // Left uncached; the hourly backfill queues it again.
             log.warn("Address lookup failed for {}: {}", next.getKey(), e.getMessage());
         }
+    }
+
+    /** The position of an address you typed, e.g. for a place you add by hand; empty if it isn't found. */
+    public Optional<double[]> findPosition(String address) {
+        JsonNode results = http.get()
+                .uri(UriComponentsBuilder.fromUriString(searchUrl)
+                        .queryParam("format", "jsonv2")
+                        .queryParam("q", address)
+                        .queryParam("limit", 1)
+                        .build().toUri())
+                .retrieve()
+                .body(JsonNode.class);
+        if (results == null || results.isEmpty()) {
+            return Optional.empty();
+        }
+        JsonNode first = results.get(0);
+        return Optional.of(new double[]{first.path("lat").asDouble(), first.path("lon").asDouble()});
     }
 
     /** Queues every parked position with no up-to-date address, e.g. after an outage or on first start. */

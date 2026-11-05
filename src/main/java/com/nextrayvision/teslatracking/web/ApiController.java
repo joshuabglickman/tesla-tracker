@@ -5,6 +5,7 @@ import com.nextrayvision.teslatracking.model.OdometerReading;
 import com.nextrayvision.teslatracking.model.OdometerReadingRepository;
 import com.nextrayvision.teslatracking.model.Vehicle;
 import com.nextrayvision.teslatracking.model.VehicleRepository;
+import com.nextrayvision.teslatracking.places.GeocodingService;
 import com.nextrayvision.teslatracking.places.PlaceService;
 import com.nextrayvision.teslatracking.places.PlaceService.PlaceLabel;
 import com.nextrayvision.teslatracking.places.SavedPlace;
@@ -24,9 +25,11 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
@@ -40,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -52,6 +56,8 @@ public class ApiController {
     private static final int MONTHLY_HISTORY_MONTHS = 12;
     private static final int RECENT_DRIVES = 25;
     private static final double DEFAULT_PLACE_RADIUS_METERS = 150;
+    private static final double MIN_PLACE_RADIUS_METERS = 10;
+    private static final double MAX_PLACE_RADIUS_METERS = 5_000;
 
     private final TeslaProperties props;
     private final TeslaAuthService auth;
@@ -61,10 +67,11 @@ public class ApiController {
     private final OdometerReadingRepository readings;
     private final PlaceService places;
     private final SavedPlaceRepository savedPlaces;
+    private final GeocodingService geocoding;
 
     public ApiController(TeslaProperties props, TeslaAuthService auth, KeyService keys, PollingService polling,
                          VehicleRepository vehicles, OdometerReadingRepository readings,
-                         PlaceService places, SavedPlaceRepository savedPlaces) {
+                         PlaceService places, SavedPlaceRepository savedPlaces, GeocodingService geocoding) {
         this.props = props;
         this.auth = auth;
         this.keys = keys;
@@ -73,6 +80,7 @@ public class ApiController {
         this.readings = readings;
         this.places = places;
         this.savedPlaces = savedPlaces;
+        this.geocoding = geocoding;
     }
 
     public record Status(boolean configured, boolean linked, String redirectUri, String fleetApiBaseUrl,
@@ -140,8 +148,18 @@ public class ApiController {
         static DriveView of(Drive d, PlaceService.Labeler labeler) {
             return new DriveView(d.startedAt(), d.endedAt(), d.approximate(), d.miles(),
                     d.startLat(), d.startLon(), labeler.label(d.startLat(), d.startLon()),
-                    d.endLat(), d.endLon(), arrival(labeler.label(d.endLat(), d.endLon()), d.destination(), d.endLat(), d.endLon()),
-                    d.destination(), d.path());
+                    d.endLat(), d.endLon(), arrivedAt(d, labeler), d.destination(), d.path());
+        }
+
+        /** Where the drive ended, named after the navigation destination and, if you saved it, your place for it. */
+        private static PlaceLabel arrivedAt(Drive d, PlaceService.Labeler labeler) {
+            PlaceLabel end = arrival(labeler.label(d.endLat(), d.endLon()), d.destination(), d.endLat(), d.endLon());
+            if (end == null || end.savedPlaceId() != null || end.name() == null) {
+                return end;
+            }
+            PlaceLabel mine = labeler.savedNamed(end.name(), d.endLat(), d.endLon());
+            return mine == null ? end
+                    : new PlaceLabel(mine.name(), mine.address() != null ? mine.address() : end.address(), mine.savedPlaceId());
         }
 
         /**
@@ -213,9 +231,14 @@ public class ApiController {
     }
 
     private static List<DriveView> recentDrives(List<OdometerReading> history, PlaceService.Labeler labeler) {
-        List<DriveView> drives = new ArrayList<>(DriveView.all(DriveDetector.detect(history), labeler));
+        List<DriveView> drives = new ArrayList<>(DriveView.all(detectDrives(history, labeler), labeler));
         Collections.reverse(drives);
         return drives.subList(0, Math.min(RECENT_DRIVES, drives.size()));
+    }
+
+    private static List<Drive> detectDrives(List<OdometerReading> history, PlaceService.Labeler labeler) {
+        return DriveDetector.detect(history,
+                r -> r.hasLocation() ? labeler.savedPlaceAt(r.getLatitude(), r.getLongitude()) : null);
     }
 
     @GetMapping("/places")
@@ -223,15 +246,72 @@ public class ApiController {
         return savedPlaces.findAll();
     }
 
+    /** Adds a place at a position, or, when none is given, at the position of its address. */
     @PostMapping("/places")
     public ResponseEntity<?> addPlace(@RequestBody NewPlace request) {
-        String name = request.name() == null ? "" : request.name().trim();
-        if (name.isEmpty() || request.latitude() == null || request.longitude() == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "A place needs a name and a position."));
+        String name = trimmed(request.name());
+        String address = trimmed(request.address());
+        if (name == null) {
+            return error("A place needs a name.");
+        }
+        if (!validRadius(request.radiusMeters())) {
+            return error(radiusError());
+        }
+        Double latitude = request.latitude();
+        Double longitude = request.longitude();
+        if (latitude == null || longitude == null) {
+            if (address == null) {
+                return error("Enter the place's address so it can be found on the map.");
+            }
+            try {
+                Optional<double[]> found = geocoding.findPosition(address);
+                if (found.isEmpty()) {
+                    return error("Couldn't find \"" + address + "\" on the map. Try adding the city and state.");
+                }
+                latitude = found.get()[0];
+                longitude = found.get()[1];
+            } catch (RestClientException e) {
+                return ResponseEntity.status(502).body(Map.of("error", "The address lookup failed. Try again in a minute."));
+            }
         }
         double radius = request.radiusMeters() == null ? DEFAULT_PLACE_RADIUS_METERS : request.radiusMeters();
-        String address = request.address() == null || request.address().isBlank() ? null : request.address().trim();
-        return ResponseEntity.ok(savedPlaces.save(new SavedPlace(name, address, request.latitude(), request.longitude(), radius)));
+        return ResponseEntity.ok(savedPlaces.save(new SavedPlace(name, address, latitude, longitude, radius)));
+    }
+
+    /** Changes a place's name, address and radius; its position stays where it is. */
+    @PutMapping("/places/{id}")
+    public ResponseEntity<?> updatePlace(@PathVariable long id, @RequestBody NewPlace request) {
+        Optional<SavedPlace> existing = savedPlaces.findById(id);
+        if (existing.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        String name = trimmed(request.name());
+        if (name == null) {
+            return error("A place needs a name.");
+        }
+        if (!validRadius(request.radiusMeters())) {
+            return error(radiusError());
+        }
+        SavedPlace place = existing.get();
+        place.update(name, trimmed(request.address()),
+                request.radiusMeters() == null ? place.getRadiusMeters() : request.radiusMeters());
+        return ResponseEntity.ok(savedPlaces.save(place));
+    }
+
+    private static boolean validRadius(Double radius) {
+        return radius == null || (radius >= MIN_PLACE_RADIUS_METERS && radius <= MAX_PLACE_RADIUS_METERS);
+    }
+
+    private static String radiusError() {
+        return String.format("The radius must be between %.0f and %.0f meters.", MIN_PLACE_RADIUS_METERS, MAX_PLACE_RADIUS_METERS);
+    }
+
+    private static String trimmed(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static ResponseEntity<Map<String, String>> error(String message) {
+        return ResponseEntity.badRequest().body(Map.of("error", message));
     }
 
     @DeleteMapping("/places/{id}")
@@ -300,7 +380,7 @@ public class ApiController {
         PlaceService.Labeler labeler = places.labeler();
         ZoneId zone = ZoneId.systemDefault();
         for (Vehicle v : vehicles.findAll()) {
-            for (DriveView d : DriveView.all(DriveDetector.detect(readings.findByVinOrderByRecordedAtAsc(v.getVin())), labeler)) {
+            for (DriveView d : DriveView.all(detectDrives(readings.findByVinOrderByRecordedAtAsc(v.getVin()), labeler), labeler)) {
                 ZonedDateTime when = d.when().atZone(zone);
                 csv.append(when.toLocalDate()).append(',')
                         .append(when.toLocalTime().truncatedTo(ChronoUnit.MINUTES)).append(',')

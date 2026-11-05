@@ -51,7 +51,7 @@
   code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; word-break: break-all; }
   textarea { width: 100%; font: 12px ui-monospace, Consolas, monospace; background: var(--bg); color: var(--text);
     border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; }
-  input[type=text] { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px;
+  input[type=text], input[type=number] { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px;
     background: var(--bg); color: var(--text); min-width: 0; flex: 1 1 220px; }
   .state { text-transform: capitalize; }
   .map { height: 300px; border-radius: 10px; border: 1px solid var(--line); margin-top: 16px; z-index: 0; }
@@ -69,7 +69,11 @@
   .name-form input { flex: 1 1 120px; padding: 4px 8px; font-size: 13px; }
   .name-form button { padding: 3px 10px; font-size: 13px; }
   ul.places { list-style: none; padding: 0; margin: 8px 0 0; }
-  ul.places li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  ul.places li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  ul.places li .actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .place-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; width: 100%; }
+  .place-form input[name=radius] { flex: 0 0 90px; }
+  .place-form .error { flex-basis: 100%; }
 </style>
 </head>
 <body>
@@ -129,8 +133,9 @@
 
   <section class="card" id="placesCard" hidden>
     <h2>Named places</h2>
-    <div class="muted">Use "Name this place" next to any address to label it (e.g. Home or Work).
-      Any position within 150 m of a named place gets that name.</div>
+    <div class="muted">Add a place by its address, or use "Name this place" next to any address in your drives.
+      Any position within a place's radius gets its name and address.</div>
+    <div style="margin-top:10px"><button type="button" id="addPlaceBtn">Add place</button></div>
     <ul class="places" id="placesList"></ul>
   </section>
 
@@ -312,15 +317,59 @@ document.addEventListener('click', async e => {
     form.outerHTML = nameButton(form.dataset.lat, form.dataset.lon, form.dataset);
     return;
   }
-  const remove = e.target.closest('button[data-remove-place]');
+  if (e.target.closest('#addPlaceBtn')) {
+    if (document.querySelector('.place-form')) return;
+    const li = document.createElement('li');
+    li.innerHTML = placeForm();
+    $('placesList').prepend(li);
+    li.querySelector('input').focus();
+    return;
+  }
+  const editPlace = e.target.closest('button[data-edit-place]');
+  if (editPlace) {
+    const p = placeList.find(p => String(p.id) === editPlace.dataset.editPlace);
+    const li = editPlace.closest('li');
+    li.innerHTML = placeForm(p);
+    li.querySelector('input').focus();
+    return;
+  }
+  if (e.target.closest('.place-form .cancel')) {
+    renderPlaces();
+    return;
+  }
+  const remove = e.target.closest('button[data-delete-place]');
   if (remove) {
-    await fetch('/api/places/' + remove.dataset.removePlace, { method: 'DELETE' });
+    const p = placeList.find(p => String(p.id) === remove.dataset.deletePlace);
+    if (!confirm(`Delete "${p?.name}"? Drives there will show the map's name and address instead.`)) return;
+    await fetch('/api/places/' + remove.dataset.deletePlace, { method: 'DELETE' });
     return refresh();
   }
   const row = e.target.closest('tr[data-drive]');
   if (row && !e.target.closest('a, button, form')) showDrive(row.dataset.vin, Number(row.dataset.drive));
 });
 document.addEventListener('submit', async e => {
+  const placeEdit = e.target.closest('.place-form');
+  if (placeEdit) {
+    e.preventDefault();
+    const id = placeEdit.dataset.id;
+    const f = placeEdit.elements;
+    const save = placeEdit.querySelector('button[type=submit]');
+    save.disabled = true;
+    save.textContent = id ? 'Saving...' : 'Finding it on the map...';
+    const res = await fetch('/api/places' + (id ? '/' + id : ''), {
+      method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: f.name.value, address: f.address.value, radiusMeters: Number(f.radius.value) })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      placeEdit.querySelector('.error').textContent = body.error || 'Saving failed.';
+      save.disabled = false;
+      save.textContent = 'Save';
+      return;
+    }
+    placeEdit.remove();
+    return refresh();
+  }
   const form = e.target.closest('.name-form');
   if (!form) return;
   e.preventDefault();
@@ -335,13 +384,31 @@ document.addEventListener('submit', async e => {
 // Forces a re-render even if the summary looks unchanged.
 function refresh() { summaries = []; return load(); }
 
+let placeList = [];
 async function loadPlaces() {
-  const list = await (await fetch('/api/places')).json();
+  if (document.querySelector('.place-form')) return; // don't wipe a place being added or edited
+  placeList = await (await fetch('/api/places')).json();
   $('placesCard').hidden = false;
-  $('placesList').innerHTML = list.length ? list.map(p => `<li><span><strong>${esc(p.name)}</strong>
-      <span class="muted small">${esc(p.address || `${p.latitude.toFixed(4)}, ${p.longitude.toFixed(4)}`)}</span></span>
-      <button type="button" data-remove-place="${p.id}">Remove</button></li>`).join('')
+  renderPlaces();
+}
+function renderPlaces() {
+  $('placesList').innerHTML = placeList.length ? placeList.map(p => `<li><span><strong>${esc(p.name)}</strong>
+      <span class="muted small">${esc(p.address || `${p.latitude.toFixed(4)}, ${p.longitude.toFixed(4)}`)}
+        &middot; within ${Math.round(p.radiusMeters)} m</span></span>
+      <span class="actions"><button type="button" data-edit-place="${p.id}">Edit</button>
+        <button type="button" data-delete-place="${p.id}">Delete</button></span></li>`).join('')
     : '<li class="muted">None yet.</li>';
+}
+// Adding finds the place on the map from its address; editing keeps its position.
+function placeForm(p) {
+  return `<form class="place-form" ${p ? `data-id="${p.id}"` : ''}>
+    <input type="text" name="name" placeholder="Name, e.g. Giant" required maxlength="80" value="${esc(p?.name || '')}">
+    <input type="text" name="address" placeholder="${p ? 'Address (optional)' : 'Address, e.g. 1020 W 41st St, Baltimore, MD'}"
+      ${p ? '' : 'required'} maxlength="200" value="${esc(p?.address || '')}">
+    <input type="number" name="radius" min="10" max="5000" step="10" required title="Radius in meters"
+      value="${Math.round(p?.radiusMeters || 150)}"><span class="muted small">m</span>
+    <button type="submit" class="primary">Save</button><button type="button" class="cancel">Cancel</button>
+    <div class="error small"></div></form>`;
 }
 
 let pendingTimer;
@@ -375,7 +442,7 @@ async function load() {
     if (lookupsPending(vehicles)) pendingTimer = setTimeout(load, 5000);
     // Re-rendering resets the map, so skip it when nothing changed (e.g. while a drive is selected).
     if (JSON.stringify(vehicles) === JSON.stringify(summaries) && maps.length) return;
-    if (document.querySelector('.name-form')) return; // don't wipe a place name being typed
+    if (document.querySelector('.name-form, .place-form')) return; // don't wipe a place name being typed
     summaries = vehicles;
     $('vehicles').innerHTML = vehicles.length ? vehicles.map(renderVehicle).join('')
       : '<section class="card muted">No vehicles found yet. The first check runs within a few minutes, or click "Check now".</section>';

@@ -41,6 +41,12 @@ public class SavedPlace {
         this.radiusMeters = radiusMeters;
     }
 
+    public void update(String name, String address, double radiusMeters) {
+        this.name = name;
+        this.address = address;
+        this.radiusMeters = radiusMeters;
+    }
+
     public Long getId() { return id; }
     public String getName() { return name; }
     public double getLatitude() { return latitude; }

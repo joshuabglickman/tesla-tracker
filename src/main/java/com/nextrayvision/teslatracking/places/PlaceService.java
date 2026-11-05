@@ -16,6 +16,9 @@ public class PlaceService {
 
     private static final double EARTH_RADIUS_METERS = 6_371_000;
 
+    /** How far from one of your places the car can park and still be at it when you navigated there by name. */
+    static final double NAMED_ARRIVAL_METERS = 500;
+
     private final SavedPlaceRepository savedPlaces;
     private final GeocodedPlaceRepository geocoded;
     private final GeocodingService geocoding;
@@ -55,26 +58,60 @@ public class PlaceService {
         List<SavedPlace> saved = savedPlaces.findAll();
         Map<String, GeocodedPlace> cache = geocoded.findAll().stream()
                 .collect(Collectors.toMap(GeocodedPlace::getCoordKey, Function.identity()));
-        return (latitude, longitude) -> {
-            if (latitude == null || longitude == null) {
-                return null;
+        return new Labeler() {
+            @Override
+            public PlaceLabel label(Double latitude, Double longitude) {
+                return labelOf(saved, cache, latitude, longitude);
             }
-            Optional<SavedPlace> mine = saved.stream()
-                    .filter(p -> distanceMeters(latitude, longitude, p.getLatitude(), p.getLongitude()) <= p.getRadiusMeters())
-                    .min(Comparator.comparingDouble(p -> distanceMeters(latitude, longitude, p.getLatitude(), p.getLongitude())));
-            GeocodedPlace found = cache.get(key(latitude, longitude));
-            if (found == null) {
-                geocoding.enqueue(latitude, longitude);
+
+            @Override
+            public Long savedPlaceAt(double latitude, double longitude) {
+                return savedPlaceNear(saved, latitude, longitude).map(SavedPlace::getId).orElse(null);
             }
-            String name = mine.map(SavedPlace::getName).orElse(found == null ? null : found.getName());
-            String address = mine.map(SavedPlace::getAddress).filter(a -> !a.isBlank())
-                    .orElse(found == null ? null : found.getAddress());
-            return new PlaceLabel(name, address, mine.map(SavedPlace::getId).orElse(null));
+
+            @Override
+            public PlaceLabel savedNamed(String name, double latitude, double longitude) {
+                return saved.stream()
+                        .filter(p -> p.getName().equalsIgnoreCase(name.trim()))
+                        .filter(p -> distanceMeters(latitude, longitude, p.getLatitude(), p.getLongitude()) <= NAMED_ARRIVAL_METERS)
+                        .min(Comparator.comparingDouble(p -> distanceMeters(latitude, longitude, p.getLatitude(), p.getLongitude())))
+                        .map(p -> new PlaceLabel(p.getName(), p.getAddress(), p.getId()))
+                        .orElse(null);
+            }
         };
     }
 
-    @FunctionalInterface
+    private PlaceLabel labelOf(List<SavedPlace> saved, Map<String, GeocodedPlace> cache, Double latitude, Double longitude) {
+        if (latitude == null || longitude == null) {
+            return null;
+        }
+        Optional<SavedPlace> mine = savedPlaceNear(saved, latitude, longitude);
+        GeocodedPlace found = cache.get(key(latitude, longitude));
+        if (found == null) {
+            geocoding.enqueue(latitude, longitude);
+        }
+        String name = mine.map(SavedPlace::getName).orElse(found == null ? null : found.getName());
+        String address = mine.map(SavedPlace::getAddress).filter(a -> !a.isBlank())
+                .orElse(found == null ? null : found.getAddress());
+        return new PlaceLabel(name, address, mine.map(SavedPlace::getId).orElse(null));
+    }
+
+    private static Optional<SavedPlace> savedPlaceNear(List<SavedPlace> saved, double latitude, double longitude) {
+        return saved.stream()
+                .filter(p -> distanceMeters(latitude, longitude, p.getLatitude(), p.getLongitude()) <= p.getRadiusMeters())
+                .min(Comparator.comparingDouble(p -> distanceMeters(latitude, longitude, p.getLatitude(), p.getLongitude())));
+    }
+
     public interface Labeler {
         PlaceLabel label(Double latitude, Double longitude);
+
+        /** The id of your place at this position, or null; unlike {@link #label}, never looks up an address. */
+        Long savedPlaceAt(double latitude, double longitude);
+
+        /**
+         * Your place with this name near the position, for when you navigated to it by name but parked
+         * outside its radius, e.g. in a big lot. Its address is null if you didn't give one.
+         */
+        PlaceLabel savedNamed(String name, double latitude, double longitude);
     }
 }

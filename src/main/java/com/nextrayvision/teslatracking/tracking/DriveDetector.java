@@ -5,6 +5,8 @@ import com.nextrayvision.teslatracking.model.OdometerReading;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
 
 /**
  * Splits readings into drives. A drive's start location and odometer come from the last parked
@@ -13,6 +15,9 @@ import java.util.List;
  * as a drive (one too short to be seen in gear, or made while this app was down); its times are
  * only known to be somewhere between those two readings, so it is flagged approximate. A drive's
  * navigation destination is the last one the car was routing to while in gear.
+ * <p>
+ * A stop shorter than the poll interval is never seen in Park, so a drive also ends where it comes back
+ * into one of your places, e.g. when you go home for something you forgot, and the next one starts there.
  */
 public final class DriveDetector {
 
@@ -40,6 +45,14 @@ public final class DriveDetector {
 
     /** @param readings one vehicle's readings in ascending time order */
     public static List<Drive> detect(List<OdometerReading> readings) {
+        return detect(readings, r -> null);
+    }
+
+    /**
+     * @param readings one vehicle's readings in ascending time order
+     * @param placeOf which of your places a reading is at, or null if none
+     */
+    public static List<Drive> detect(List<OdometerReading> readings, Function<OdometerReading, Object> placeOf) {
         List<Drive> drives = new ArrayList<>();
         OdometerReading lastParked = null;
         List<OdometerReading> open = null;
@@ -51,6 +64,11 @@ public final class DriveDetector {
                     if (lastParked != null) {
                         open.add(lastParked);
                     }
+                } else if (arrivedAtPlace(open.getLast(), r, placeOf)) {
+                    open.add(r);
+                    drives.add(drive(open, false, false));
+                    open = new ArrayList<>(List.of(r));
+                    continue;
                 }
                 open.add(r);
                 continue;
@@ -68,6 +86,12 @@ public final class DriveDetector {
             drives.add(drive(open, true, false));
         }
         return drives;
+    }
+
+    private static boolean arrivedAtPlace(OdometerReading previous, OdometerReading r,
+                                          Function<OdometerReading, Object> placeOf) {
+        Object place = placeOf.apply(r);
+        return place != null && !Objects.equals(place, placeOf.apply(previous));
     }
 
     private static Drive drive(List<OdometerReading> points, boolean inProgress, boolean approximate) {

@@ -66,6 +66,33 @@ class DriveDetectorTest {
     }
 
     @Test
+    void quickStopBackAtYourPlaceSplitsTheDrive() {
+        // Home to the marina, back home for the keys without being seen in Park, then to the marina again.
+        List<OdometerReading> readings = List.of(
+                at("09:00", 1000.0, "P", 0, 0),
+                at("09:20", 1007.0, "D", 5, 5),
+                at("09:25", 1010.0, "D", 0, 0),
+                at("09:30", 1011.0, "D", 1, 1),
+                at("09:45", 1015.0, "P", 9, 9));
+        List<Drive> drives = DriveDetector.detect(readings, r -> r.getLatitude() == 0 ? "Home" : null);
+
+        assertThat(drives).hasSize(2);
+        assertThat(drives.get(0).miles()).isCloseTo(10.0, within(1e-9));
+        assertThat(drives.get(0).endLat()).isEqualTo(0);
+        assertThat(drives.get(1).miles()).isCloseTo(5.0, within(1e-9));
+        assertThat(drives.get(1).startLat()).isEqualTo(0);
+        assertThat(drives.get(1).startedAt()).isEqualTo(Instant.parse("2026-10-01T09:25:00Z"));
+
+        // Leaving home, still in gear inside it, is not a stop.
+        List<Drive> leaving = DriveDetector.detect(List.of(
+                at("09:00", 1000.0, "P", 0, 0),
+                at("09:05", 1000.1, "D", 0, 0),
+                at("09:10", 1003.0, "D", 5, 5),
+                at("09:15", 1005.0, "P", 9, 9)), r -> r.getLatitude() == 0 ? "Home" : null);
+        assertThat(leaving).hasSize(1);
+    }
+
+    @Test
     void driveStillInGearIsInProgress() {
         List<Drive> drives = DriveDetector.detect(List.of(
                 at("08:00", 1000.0, "P", 1, 1),

@@ -26,11 +26,15 @@ address), and each drive with its start and end places, route and distance. Ever
 - Each place the car parks is turned into a street address, plus a name for businesses and landmarks, using
   OpenStreetMap's free Nominatim service. Each spot is looked up once and cached, at most one request every
   1.5 seconds. Only coordinates are sent. Set `geocoding.enabled=false` to turn this off.
-- You can name places yourself (e.g. "Home", "Work") with **Name this place** on the dashboard. Any position
-  within 150 m of a named place uses your name. You can also give it an address, for places where the map's
-  address is wrong.
+- You can name places yourself (e.g. "Home", "Work") with **Name this place** on the dashboard, or add, edit and
+  delete them in **Named places** (a place you add is found on the map from its address). Any position
+  within a named place's radius (150 m unless you change it) uses your name. You can also give it an address, for places where the map's
+  address is wrong. When you navigate to one of your places by its name, you are at it anywhere within 500 m,
+  e.g. in a big parking lot.
 - A drive that starts where the previous one ended starts from the place that one arrived at, so the trip back
   from a navigation destination keeps its name.
+- A stop shorter than the 5-minute poll is never seen in Park, so a drive also ends where it comes back into
+  one of your named places (e.g. going home for forgotten keys), and the next drive starts there.
 - Data stays on this machine in `data/` (H2 database, plus the app's key pair). The location history is
   sensitive, so the dashboard only listens on localhost.
 

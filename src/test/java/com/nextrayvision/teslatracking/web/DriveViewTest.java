@@ -1,7 +1,9 @@
 package com.nextrayvision.teslatracking.web;
 
 import com.nextrayvision.teslatracking.places.PlaceService.PlaceLabel;
+import com.nextrayvision.teslatracking.places.PlaceService;
 import com.nextrayvision.teslatracking.tracking.DriveDetector.Destination;
+import com.nextrayvision.teslatracking.tracking.DriveDetector.Drive;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -55,6 +57,32 @@ class DriveViewTest {
         assertThat(there.departingFrom(back).startPlace()).isEqualTo(home);
         ApiController.DriveView elsewhere = drive(park, 39.29, -76.59, home, 39.313339, -76.630338);
         assertThat(elsewhere.departingFrom(there).startPlace()).isEqualTo(park);
+    }
+
+    @Test
+    void navigatingToYourPlaceByNameUsesItsAddressAnywhereInTheLot() {
+        PlaceLabel yours = new PlaceLabel("Anchorage Marina", "2401 Boston St, Baltimore, MD 21224", 2L);
+        PlaceService.Labeler labeler = new PlaceService.Labeler() {
+            @Override
+            public PlaceLabel label(Double latitude, Double longitude) {
+                return new PlaceLabel("Anchorage Marina", "2363 Boston St, Baltimore, MD 21224", null);
+            }
+
+            @Override
+            public Long savedPlaceAt(double latitude, double longitude) {
+                return null;
+            }
+
+            @Override
+            public PlaceLabel savedNamed(String name, double latitude, double longitude) {
+                return name.equals("Anchorage Marina") ? yours : null;
+            }
+        };
+        Instant start = Instant.parse("2026-11-04T09:46:00Z");
+        Drive drive = new Drive(start, start.plusSeconds(1800), false, 4.5, 39.313294, -76.630342, 39.282335, -76.583337,
+                new Destination("Anchorage Marina", 39.280643, -76.581671), List.of());
+
+        assertThat(ApiController.DriveView.of(drive, labeler).endPlace()).isEqualTo(yours);
     }
 
     private static ApiController.DriveView drive(PlaceLabel from, double fromLat, double fromLon,

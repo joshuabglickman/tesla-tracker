@@ -29,6 +29,10 @@ final class ReadPacer {
     boolean shouldRead(Instant now, boolean justWoke, boolean wasDriving) {
         if (justWoke || wasDriving) {
             pausedUntil = null;
+            if (justWoke) {
+                // Idle time from before it slept doesn't count, or the first read could start a pause.
+                idleSince = null;
+            }
             return true;
         }
         if (pausedUntil != null) {

@@ -49,6 +49,16 @@ class ReadPacerTest {
         assertThat(drivingReads(pacer, 30, 60)).isEqualTo(7);
     }
 
+    @Test
+    void idleTimeFromBeforeTheCarSleptDoesNotCount() {
+        ReadPacer pacer = new ReadPacer(Duration.ofMinutes(15), Duration.ofMinutes(21));
+        parkedReads(pacer, 0, 5);
+        // It fell asleep, then woke up hours later: read every poll again before pausing.
+        assertThat(pacer.shouldRead(minute(300), true, false)).isTrue();
+        pacer.afterRead(minute(300), false, false);
+        assertThat(parkedReads(pacer, 305, 315)).containsExactly(305, 310, 315);
+    }
+
     private static int drivingReads(ReadPacer pacer, int from, int to) {
         int reads = 0;
         for (int m = from; m <= to; m += 5) {
